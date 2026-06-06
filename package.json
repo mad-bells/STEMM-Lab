@@ -2,12 +2,22 @@
   "name": "stemm-lab",
   "version": "1.0.0",
   "main": "index.js",
+<<<<<<< HEAD
+=======
+  "dependencies": {
+    "expo": "~56.0.9",
+    "expo-status-bar": "~56.0.4",
+    "react": "19.2.3",
+    "react-native": "0.85.3"
+  },
+>>>>>>> 3bfa70a0c1a39767885c18004058324c3fa03da6
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
+<<<<<<< HEAD
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -39,5 +49,7 @@
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1"
   },
+=======
+>>>>>>> 3bfa70a0c1a39767885c18004058324c3fa03da6
   "private": true
 }
