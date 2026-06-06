@@ -8,6 +8,7 @@ import { Colors } from '../theme';
 import StartupScreen from '../screens/StartupScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
+import TeamScreen from '../screens/TeamScreen';
 
 // Activity Screens
 import ParachuteScreen from '../screens/activities/ParachuteScreen';
@@ -39,6 +40,7 @@ function MainTabs() {
           const icons = {
             Activities: focused ? 'flask' : 'flask-outline',
             Leaderboard: focused ? 'trophy' : 'trophy-outline',
+            Team: focused ? 'people' : 'people-outline',
           };
           return <Ionicons name={icons[route.name]} size={size} color={color} />;
         },
@@ -46,6 +48,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Activities" component={HomeScreen} />
       <Tab.Screen name="Leaderboard" component={LeaderboardScreen} />
+      <Tab.Screen name="Team" component={TeamScreen} />
     </Tab.Navigator>
   );
 }

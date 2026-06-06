@@ -1,5 +1,6 @@
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
+import Constants from 'expo-constants';
 import { getUnsyncedResults, markResultSynced } from './database';
 import { submitResult } from './firebase';
 
@@ -26,6 +27,8 @@ TaskManager.defineTask(SYNC_TASK, async () => {
 });
 
 export async function registerBackgroundTask() {
+  // Background fetch requires a native dev build — skip silently in Expo Go
+  if (Constants.appOwnership === 'expo') return;
   try {
     await BackgroundFetch.registerTaskAsync(SYNC_TASK, {
       minimumInterval: 15 * 60,

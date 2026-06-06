@@ -3,10 +3,12 @@
  * Activity grid + team header.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import AdBanner from '../components/AdBanner';
 import ActivityCard from '../components/ActivityCard';
 import { getTeamLocal } from '../services/database';
 
@@ -23,14 +25,15 @@ const ACTIVITIES = [
 export default function HomeScreen({ navigation }) {
   const [team, setTeam] = useState(null);
 
-  useEffect(() => {
-    const t = getTeamLocal();
-    setTeam(t);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      setTeam(getTeamLocal());
+    }, [])
+  );
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.container} bounces={false}>
 
         {/* Header */}
         <View style={styles.header}>
@@ -67,6 +70,9 @@ export default function HomeScreen({ navigation }) {
             />
           ))}
         </View>
+
+        {/* AdMob banner */}
+        <AdBanner style={styles.ad} />
 
       </ScrollView>
     </SafeAreaView>
@@ -131,5 +137,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: 11,
+  },
+  ad: {
+    marginTop: 8,
+    marginBottom: 8,
   },
 });

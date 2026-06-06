@@ -7,33 +7,69 @@
  */
 
 import React, { useState, useRef } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet, Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius, Typography, Shadow } from '../../theme';
 import MetricCard from '../../components/MetricCard';
 import PrimaryButton from '../../components/PrimaryButton';
+import InstructionsCard from '../../components/InstructionsCard';
+import ScienceCard from '../../components/ScienceCard';
+import ActivityTabs from '../../components/ActivityTabs';
+import ResultSubmitSheet from '../../components/ResultSubmitSheet';
+import VideoPickerButton from '../../components/VideoPickerButton';
 import useAccelerometer from '../../hooks/useAccelerometer';
 import { scoreFromMagnitude } from '../../utils/calculations';
 import { saveResultLocal } from '../../services/database';
 import { getCurrentLocation } from '../../services/location';
-import { submitResult, markActivityComplete } from '../../services/firebase';
+import { submitResult, markActivityComplete, uploadVideo } from '../../services/firebase';
 import { sendNotification } from '../../services/notifications';
+import { syncTeamToFirestore } from '../../utils/syncTeam';
+
+const EQUIPMENT = [
+  'Mobile phone with STEMM Lab app',
+  'Building materials: straws, tape, card/cardboard, scissors',
+  'A flat surface to build on',
+];
+
+const INSTRUCTIONS = [
+  'Build 3 different earthquake-resistant structures using straws, tape, and card.',
+  'Place the phone flat on top of your first structure.',
+  'Tap Start next to Design 1, then gently shake the table to simulate an earthquake.',
+  'Tap Stop — the app records the peak vibration for that design.',
+  'Test all 3 designs, then go to the Results tab. Lower vibration = more stable structure!',
+];
+
+const WRITE_UP = {
+  questions: [
+    'Predict which structure will be most stable.',
+    'What shape do you think will perform best, and why?',
+    'What would you change about your best design?',
+  ],
+  columns: ['Phone moves (prediction)', 'Outcome (in degrees)', 'Were you right?'],
+  rows: ['Design 1 (e.g. 4 folds + 4 pillars)', 'Design 2 (e.g. 10 folds + 4 pillars)', 'Design 3 (e.g. 3 folds + 6 pillars)'],
+};
+
+const SCIENCE = [
+  'Earthquakes cause the ground to vibrate rapidly. Structures that absorb or redirect these vibrations are less likely to collapse.',
+  'Triangular shapes are particularly strong because they distribute force evenly across all sides.',
+  'Engineers use accelerometers (the same sensor in your phone) to measure vibrations in real buildings during earthquake tests.',
+];
 
 const DESIGNS = ['Design 1', 'Design 2', 'Design 3'];
 
 export default function EarthquakeScreen() {
-  const { x, y, z, magnitude, available } = useAccelerometer(100);
+  const { magnitude, available } = useAccelerometer(100);
+  const [tab, setTab] = useState('instructions');
   const [recording, setRecording] = useState(false);
   const [currentDesign, setCurrentDesign] = useState(0);
   const [maxMags, setMaxMags] = useState([null, null, null]);
   const maxRef = useRef(0);
   const [saving, setSaving] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
+  const [videoUri, setVideoUri] = useState(null);
 
-  // While recording, track peak magnitude for current design
   if (recording && magnitude - 1 > maxRef.current) {
-    maxRef.current = magnitude - 1; // subtract 1g of gravity
+    maxRef.current = magnitude - 1;
   }
 
   function startRecording(index) {
@@ -49,7 +85,9 @@ export default function EarthquakeScreen() {
     setRecording(false);
   }
 
-  async function handleSave() {
+  const hasResults = maxMags.some((v) => v !== null);
+
+  async function handleSave({ rating, comment }) {
     const valid = maxMags.filter((v) => v !== null);
     if (!valid.length) { Alert.alert('No data', 'Record at least one design first.'); return; }
 
@@ -59,19 +97,20 @@ export default function EarthquakeScreen() {
       const loc = await getCurrentLocation();
       const bestMag = Math.min(...valid.map(Number));
       const score = scoreFromMagnitude(bestMag, 0, 3);
+      const videoUrl = videoUri ? await uploadVideo(teamId, 'earthquake', videoUri) : null;
 
-      const data = { designs: DESIGNS, maxMagnitudes: maxMags };
-
+      const data = { designs: DESIGNS, maxMagnitudes: maxMags, rating, comment, videoUrl };
       saveResultLocal(teamId, 'earthquake', data, score, loc?.latitude, loc?.longitude);
-      await submitResult(teamId, 'earthquake', { ...data, score });
-      await markActivityComplete(teamId, 'earthquake');
-      await sendNotification('Activity Complete! 🏗️', `Earthquake structure saved. Score: ${score} pts`);
-
-      Alert.alert('Saved!', `Best vibration: ${bestMag.toFixed(3)} m/s² · Score: ${score} pts`);
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    } finally {
+      setShowSheet(false);
       setSaving(false);
+      submitResult(teamId, 'earthquake', { ...data, score }).catch(console.warn);
+      markActivityComplete(teamId, 'earthquake').catch(console.warn);
+      syncTeamToFirestore().catch(console.warn);
+      sendNotification('Activity Complete!', 'Earthquake structure saved.').catch(console.warn);
+      Alert.alert('Saved!', `Best vibration: ${bestMag.toFixed(3)} m/s²`);
+    } catch (err) {
+      setSaving(false);
+      Alert.alert('Error', err.message);
     }
   }
 
@@ -84,64 +123,78 @@ export default function EarthquakeScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.intro}>
-        Place the phone on your structure. Press Start to measure how much it vibrates.
-        Less movement = better design!
-      </Text>
-
-      {/* Live sensor */}
-      {recording ? (
-        <View style={[styles.liveCard, Shadow.md]}>
-          <Text style={styles.liveTitle}>📡 Recording Design {currentDesign + 1}…</Text>
-          <Text style={styles.liveValue}>{(Math.max(0, magnitude - 1)).toFixed(3)}</Text>
-          <Text style={styles.liveUnit}>m/s² vibration</Text>
-          <Text style={styles.peakText}>Peak: {maxRef.current.toFixed(3)} m/s²</Text>
-          <PrimaryButton title="⏹ Stop Recording" onPress={stopRecording} color={Colors.error} style={{ marginTop: Spacing.md }} />
-        </View>
-      ) : (
-        <View style={[styles.card, Shadow.sm]}>
-          <Text style={styles.cardTitle}>Test Your Designs</Text>
-          {DESIGNS.map((d, i) => (
-            <View key={i} style={styles.designRow}>
-              <View style={styles.designInfo}>
-                <Text style={styles.designLabel}>{d}</Text>
-                {maxMags[i] != null && (
-                  <Text style={{ color: Colors.success, ...Typography.bodySmall }}>
-                    Peak: {maxMags[i]} m/s²
-                  </Text>
-                )}
+    <>
+      <ActivityTabs
+        tab={tab} onTabChange={setTab} hasResults={hasResults}
+        instructions={
+          <>
+            <InstructionsCard steps={INSTRUCTIONS} equipment={EQUIPMENT} writeUp={WRITE_UP} />
+            <ScienceCard paragraphs={SCIENCE} />
+          </>
+        }
+        record={
+          <>
+            {recording ? (
+              <View style={[styles.liveCard, Shadow.md]}>
+                <Text style={styles.liveTitle}>Recording Design {currentDesign + 1}…</Text>
+                <Text style={styles.liveValue}>{(Math.max(0, magnitude - 1)).toFixed(3)}</Text>
+                <Text style={styles.liveUnit}>m/s² vibration</Text>
+                <Text style={styles.peakText}>Peak: {maxRef.current.toFixed(3)} m/s²</Text>
+                <PrimaryButton title="Stop Recording" onPress={stopRecording} color={Colors.error} style={{ marginTop: Spacing.md }} />
               </View>
-              <PrimaryButton
-                title={maxMags[i] != null ? '↺ Redo' : '▶ Start'}
-                onPress={() => startRecording(i)}
-                color={maxMags[i] != null ? Colors.accent : Colors.primary}
-                style={styles.smallBtn}
-              />
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Results */}
-      {maxMags.some((v) => v !== null) && !recording && (
-        <View style={styles.resultsSection}>
-          <Text style={styles.sectionTitle}>📊 Results</Text>
-          {maxMags.map((m, i) => m != null && (
-            <MetricCard key={i} label={DESIGNS[i]} value={m} unit="m/s²" color={Colors.warning} />
-          ))}
-          <PrimaryButton title="💾 Save Result" onPress={handleSave} loading={saving} style={{ marginTop: Spacing.md }} />
-        </View>
-      )}
-    </ScrollView>
+            ) : (
+              <View style={[styles.card, Shadow.sm]}>
+                <Text style={styles.cardTitle}>Test Your Designs</Text>
+                {DESIGNS.map((d, i) => (
+                  <View key={i} style={styles.designRow}>
+                    <View style={styles.designInfo}>
+                      <Text style={styles.designLabel}>{d}</Text>
+                      {maxMags[i] != null && (
+                        <Text style={{ color: Colors.success, ...Typography.bodySmall }}>
+                          Peak: {maxMags[i]} m/s²
+                        </Text>
+                      )}
+                    </View>
+                    <PrimaryButton
+                      title={maxMags[i] != null ? 'Redo' : 'Start'}
+                      onPress={() => startRecording(i)}
+                      color={maxMags[i] != null ? Colors.accent : Colors.primary}
+                      style={styles.smallBtn}
+                    />
+                  </View>
+                ))}
+              </View>
+            )}
+            <VideoPickerButton uri={videoUri} onPick={setVideoUri} />
+            {hasResults && !recording && (
+              <PrimaryButton title="View Results" onPress={() => setTab('results')} style={{ marginTop: Spacing.sm }} />
+            )}
+          </>
+        }
+        results={
+          hasResults ? (
+            <>
+              {maxMags.map((m, i) => m != null && (
+                <MetricCard key={i} label={DESIGNS[i]} value={m} unit="m/s²" color={Colors.warning} />
+              ))}
+              <PrimaryButton title="Save Result" onPress={() => setShowSheet(true)} style={{ marginTop: Spacing.md }} />
+            </>
+          ) : (
+            <Text style={styles.noResults}>Test at least one design in the Record tab first.</Text>
+          )
+        }
+      />
+      <ResultSubmitSheet
+        visible={showSheet} onClose={() => setShowSheet(false)}
+        onSubmit={handleSave} loading={saving}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.background },
-  container: { padding: Spacing.md, paddingBottom: 48 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.lg },
-  intro: { ...Typography.body, color: Colors.textSecondary, marginBottom: Spacing.md },
+  unavailable: { ...Typography.body, color: Colors.textSecondary, textAlign: 'center' },
   liveCard: {
     backgroundColor: Colors.surface, borderRadius: Radius.lg,
     padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.md,
@@ -150,10 +203,7 @@ const styles = StyleSheet.create({
   liveValue: { fontSize: 64, fontWeight: '900', color: Colors.warning },
   liveUnit: { ...Typography.body, color: Colors.textSecondary, marginBottom: 4 },
   peakText: { ...Typography.label, color: Colors.error },
-  card: {
-    backgroundColor: Colors.surface, borderRadius: Radius.lg,
-    padding: Spacing.md, marginBottom: Spacing.md,
-  },
+  card: { backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.md, marginBottom: Spacing.md },
   cardTitle: { ...Typography.h4, marginBottom: Spacing.sm },
   designRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -162,7 +212,5 @@ const styles = StyleSheet.create({
   designInfo: { flex: 1 },
   designLabel: { ...Typography.body },
   smallBtn: { paddingHorizontal: Spacing.md, paddingVertical: 8, minWidth: 80 },
-  resultsSection: { marginTop: Spacing.sm },
-  sectionTitle: { ...Typography.h3, marginBottom: Spacing.sm },
-  unavailable: { ...Typography.body, color: Colors.textSecondary, textAlign: 'center' },
+  noResults: { ...Typography.body, color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
 });

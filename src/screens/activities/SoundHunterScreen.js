@@ -1,26 +1,62 @@
 /**
  * SoundHunterScreen.js
  * Activity 2: Sound Pollution Hunter
- * Live dB meter using the microphone. Students record noise from 3 actions.
+ * Live dB meter. Students trigger a 3-second peak capture per action.
  *
  * Device features used: Microphone (expo-av), GPS location tagging
  */
 
-import React, { useState } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet, Alert, TouchableOpacity,
-} from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Colors, Spacing, Radius, Typography, Shadow } from '../../theme';
 import MetricCard from '../../components/MetricCard';
 import PrimaryButton from '../../components/PrimaryButton';
+import InstructionsCard from '../../components/InstructionsCard';
+import ScienceCard from '../../components/ScienceCard';
+import ActivityTabs from '../../components/ActivityTabs';
+import ResultSubmitSheet from '../../components/ResultSubmitSheet';
+import VideoPickerButton from '../../components/VideoPickerButton';
 import useAudioLevel from '../../hooks/useAudioLevel';
 import { saveResultLocal } from '../../services/database';
 import { getCurrentLocation } from '../../services/location';
-import { submitResult, markActivityComplete } from '../../services/firebase';
+import { submitResult, markActivityComplete, uploadVideo } from '../../services/firebase';
 import { sendNotification } from '../../services/notifications';
+import { syncTeamToFirestore } from '../../utils/syncTeam';
 
-const ACTIONS = ['Action 1 (drop book)', 'Action 2', 'Action 3'];
+const EQUIPMENT = [
+  'Mobile phone with STEMM Lab app',
+  'A quiet classroom or outdoor space',
+  'Items to create sounds (e.g. book, hands, voice)',
+];
+
+const INSTRUCTIONS = [
+  'You will record 3 different classroom actions (e.g. dropping a book, clapping, shouting).',
+  'Tap Measure next to an action, then perform the action straight away.',
+  'The app listens for 3 seconds and captures the loudest reading automatically.',
+  'Repeat for all 3 actions, then go to the Results tab.',
+  'Compare the dB levels — which action was loudest? Is any level dangerous?',
+];
+
+const WRITE_UP = {
+  questions: [
+    'Predict which action will be the loudest.',
+    'At what dB level does sound become dangerous?',
+    'Were your predictions correct?',
+  ],
+  columns: ['Prediction (louder or softer than)', 'Outcome (dB)', 'Were you right?'],
+  rows: ['Action 1 (e.g. dropping a book on the table)', 'Action 2', 'Action 3'],
+};
+
+const SCIENCE = [
+  'Sound is a vibration that travels through the air as a wave. We measure its loudness in decibels (dB).',
+  'Normal conversation is around 60 dB. Sounds above 85 dB can cause hearing damage over time. Sounds above 120 dB can cause immediate pain.',
+  'Scientists and engineers study sound pollution to design quieter environments — in schools, workplaces, and cities.',
+];
+
+const ACTIONS = ['Action 1', 'Action 2', 'Action 3'];
+const CAPTURE_SECONDS = 3;
 
 function getRisk(db) {
   if (db < 60) return { label: 'Safe', color: Colors.success };
@@ -31,169 +67,250 @@ function getRisk(db) {
 }
 
 export default function SoundHunterScreen() {
+  const [tab, setTab] = useState('instructions');
   const [measuring, setMeasuring] = useState(false);
   const [currentAction, setCurrentAction] = useState(0);
+  const [countdown, setCountdown] = useState(CAPTURE_SECONDS);
   const [recorded, setRecorded] = useState([null, null, null]);
+  const [showSheet, setShowSheet] = useState(false);
+  const [videoUris, setVideoUris] = useState([null, null, null]);
   const [saving, setSaving] = useState(false);
   const { dB, hasPermission } = useAudioLevel(measuring);
 
-  function startMeasure(index) {
+  const peakRef = useRef(0);
+  const timerRef = useRef(null);
+  const currentActionRef = useRef(0);
+  const recordedRef = useRef([null, null, null]);
+
+  useEffect(() => {
+    if (measuring && dB > peakRef.current) peakRef.current = dB;
+  }, [dB, measuring]);
+
+  function setVideoUri(index, uri) {
+    setVideoUris((prev) => {
+      const next = [...prev];
+      next[index] = uri;
+      return next;
+    });
+  }
+
+  async function startMeasure(index) {
     setCurrentAction(index);
+    currentActionRef.current = index;
+    peakRef.current = 0;
+    setCountdown(CAPTURE_SECONDS);
     setMeasuring(true);
+    await activateKeepAwakeAsync(); // prevent screen from sleeping during capture
+
+    let seconds = CAPTURE_SECONDS;
+    timerRef.current = setInterval(() => {
+      seconds -= 1;
+      setCountdown(seconds);
+      if (seconds <= 0) {
+        clearInterval(timerRef.current);
+        const updated = [...recordedRef.current];
+        updated[currentActionRef.current] = peakRef.current;
+        recordedRef.current = updated;
+        setRecorded([...updated]);
+        setMeasuring(false);
+        deactivateKeepAwake();
+      }
+    }, 1000);
   }
 
-  function recordReading(index) {
-    const updated = [...recorded];
-    updated[index] = dB;
-    setRecorded(updated);
+  function cancelMeasure() {
+    clearInterval(timerRef.current);
     setMeasuring(false);
+    deactivateKeepAwake();
   }
 
-  async function handleSave() {
-    const valid = recorded.filter(Boolean);
-    if (valid.length === 0) { Alert.alert('No readings', 'Record at least one action.'); return; }
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    deactivateKeepAwake();
+  }, []);
 
+  const hasResults = recorded.some((r) => r != null);
+
+  async function handleSave({ rating, comment }) {
     setSaving(true);
     try {
       const teamId = await AsyncStorage.getItem('teamId');
       const loc = await getCurrentLocation();
+      const valid = recorded.filter((r) => r != null);
       const avgDb = valid.reduce((a, b) => a + b, 0) / valid.length;
-      const score = Math.max(0, Math.round(100 - avgDb));
 
-      const data = { actions: ACTIONS, readings: recorded };
+      const videoUrls = await Promise.all(
+        videoUris.map((uri, i) =>
+          uri ? uploadVideo(teamId, `sound_action${i + 1}`, uri) : Promise.resolve(null)
+        )
+      );
 
-      saveResultLocal(teamId, 'sound', data, score, loc?.latitude, loc?.longitude);
-      await submitResult(teamId, 'sound', { ...data, score });
-      await markActivityComplete(teamId, 'sound');
-      await sendNotification('Activity Complete! 🔊', `Sound readings saved. Score: ${score} pts`);
-
-      Alert.alert('Saved!', `Average: ${avgDb.toFixed(0)} dB · Score: ${score} pts`);
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    } finally {
+      const data = { actions: ACTIONS, readings: recorded, rating, comment, videoUrls };
+      saveResultLocal(teamId, 'sound', data, 0, loc?.latitude, loc?.longitude);
+      setShowSheet(false);
       setSaving(false);
+      submitResult(teamId, 'sound', data).catch(console.warn);
+      markActivityComplete(teamId, 'sound').catch(console.warn);
+      syncTeamToFirestore().catch(console.warn);
+      sendNotification('Activity Complete!', 'Sound readings saved.').catch(console.warn);
+      Alert.alert('Saved!', `Average peak: ${avgDb.toFixed(0)} dB`);
+    } catch (err) {
+      setSaving(false);
+      Alert.alert('Error', err.message);
     }
   }
 
   const risk = getRisk(dB);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.intro}>
-        Measure noise from different classroom actions. Which is loudest?
-      </Text>
-
-      {/* Live meter */}
-      {measuring && (
-        <View style={[styles.meterCard, Shadow.md]}>
-          <Text style={styles.meterLabel}>Live Sound Level</Text>
-          <Text style={styles.meterValue}>{dB}</Text>
-          <Text style={styles.meterUnit}>dB</Text>
-          <Text style={[styles.riskBadge, { backgroundColor: risk.color }]}>{risk.label}</Text>
-
-          {/* Visual bar */}
-          <View style={styles.barBg}>
-            <View style={[styles.barFill, { width: `${Math.min(dB, 130) / 130 * 100}%`, backgroundColor: risk.color }]} />
-          </View>
-
-          <PrimaryButton
-            title={`Record for ${ACTIONS[currentAction]}`}
-            onPress={() => recordReading(currentAction)}
-            color={Colors.success}
-            style={{ marginTop: Spacing.md }}
-          />
-          <TouchableOpacity onPress={() => setMeasuring(false)} style={{ marginTop: Spacing.sm, alignItems: 'center' }}>
-            <Text style={{ color: Colors.textSecondary }}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Action rows */}
-      {!measuring && (
-        <View style={[styles.card, Shadow.sm]}>
-          <Text style={styles.cardTitle}>Record Actions</Text>
-          {ACTIONS.map((action, i) => (
-            <View key={i} style={styles.actionRow}>
-              <View style={styles.actionInfo}>
-                <Text style={styles.actionLabel}>{action}</Text>
-                {recorded[i] != null && (
-                  <Text style={[styles.actionValue, { color: getRisk(recorded[i]).color }]}>
-                    {recorded[i]} dB — {getRisk(recorded[i]).label}
-                  </Text>
-                )}
+    <>
+      <ActivityTabs
+        tab={tab} onTabChange={setTab} hasResults={hasResults}
+        instructions={
+          <>
+            <InstructionsCard steps={INSTRUCTIONS} equipment={EQUIPMENT} writeUp={WRITE_UP} />
+            <ScienceCard paragraphs={SCIENCE} />
+          </>
+        }
+        record={
+          <>
+            {measuring ? (
+              <View style={[styles.meterCard, Shadow.md]}>
+                <Text style={styles.meterLabel}>{ACTIONS[currentAction]}</Text>
+                <Text style={styles.countdown}>{countdown}</Text>
+                <Text style={styles.countdownLabel}>seconds remaining</Text>
+                <Text style={styles.meterValue}>{dB} <Text style={styles.meterUnit}>dB</Text></Text>
+                <Text style={styles.peakValue}>Peak: {peakRef.current} dB</Text>
+                <Text style={[styles.riskBadge, { backgroundColor: risk.color }]}>{risk.label}</Text>
+                <View style={styles.barBg}>
+                  <View style={[styles.barFill, { width: `${Math.min(dB, 130) / 130 * 100}%`, backgroundColor: risk.color }]} />
+                </View>
+                <TouchableOpacity onPress={cancelMeasure} style={{ marginTop: Spacing.md, alignItems: 'center' }}>
+                  <Text style={{ color: Colors.textSecondary }}>Cancel</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={[styles.measureBtn, { backgroundColor: recorded[i] != null ? Colors.success + '20' : Colors.primary }]}
-                onPress={() => startMeasure(i)}
-              >
-                <Text style={{ color: recorded[i] != null ? Colors.success : Colors.white, fontWeight: '700' }}>
-                  {recorded[i] != null ? '↺ Redo' : '🎙 Measure'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Results summary */}
-      {recorded.some(Boolean) && !measuring && (
-        <View style={styles.resultsSection}>
-          <Text style={styles.sectionTitle}>📊 Readings</Text>
-          {recorded.map((r, i) => r != null && (
-            <MetricCard key={i} label={ACTIONS[i]} value={String(r)} unit="dB" color={getRisk(r).color} />
-          ))}
-          <PrimaryButton title="💾 Save Result" onPress={handleSave} loading={saving} style={{ marginTop: Spacing.md }} />
-        </View>
-      )}
-
-      {hasPermission === false && (
-        <Text style={styles.warning}>⚠️ Microphone permission denied. Enable it in device settings.</Text>
-      )}
-    </ScrollView>
+            ) : (
+              <>
+                <Text style={styles.sectionLabel}>Tap Measure, then make your sound</Text>
+                {ACTIONS.map((action, i) => {
+                  const done = recorded[i] != null;
+                  const r = done ? getRisk(recorded[i]) : null;
+                  return (
+                    <View key={i} style={[styles.actionCard, Shadow.sm, done && { borderColor: r.color, borderWidth: 2 }]}>
+                      <View style={styles.actionCardTop}>
+                        <View style={[styles.actionBadge, done && { backgroundColor: r.color }]}>
+                          <Text style={styles.actionBadgeText}>{i + 1}</Text>
+                        </View>
+                        <View style={styles.actionCardInfo}>
+                          <Text style={styles.actionCardTitle}>{action}</Text>
+                          {done ? (
+                            <View style={styles.dbRow}>
+                              <Text style={[styles.dbValue, { color: r.color }]}>{recorded[i]} dB</Text>
+                              <View style={[styles.riskPill, { backgroundColor: r.color + '22' }]}>
+                                <Text style={[styles.riskPillText, { color: r.color }]}>{r.label}</Text>
+                              </View>
+                            </View>
+                          ) : (
+                            <Text style={styles.actionCardHint}>Not yet recorded</Text>
+                          )}
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.measureBtn, done && styles.measureBtnRedo]}
+                        onPress={() => startMeasure(i)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.measureBtnText, done && styles.measureBtnTextRedo]}>
+                          {done ? 'Re-measure' : '🎙 Measure'}
+                        </Text>
+                      </TouchableOpacity>
+                      <VideoPickerButton
+                        uri={videoUris[i]}
+                        onPick={(uri) => setVideoUri(i, uri)}
+                        style={styles.videoPicker}
+                      />
+                    </View>
+                  );
+                })}
+              </>
+            )}
+            {hasResults && !measuring && (
+              <PrimaryButton title="View Results" onPress={() => setTab('results')} style={{ marginTop: Spacing.sm }} />
+            )}
+            {hasPermission === false && (
+              <Text style={styles.warning}>Microphone permission denied. Enable it in device settings.</Text>
+            )}
+          </>
+        }
+        results={
+          hasResults ? (
+            <>
+              {recorded.map((r, i) => r != null && (
+                <MetricCard key={i} label={ACTIONS[i]} value={String(r)} unit="dB" color={getRisk(r).color} />
+              ))}
+              <PrimaryButton title="Save Result" onPress={() => setShowSheet(true)} style={{ marginTop: Spacing.md }} />
+            </>
+          ) : (
+            <Text style={styles.noResults}>Record at least one action in the Record tab first.</Text>
+          )
+        }
+      />
+      <ResultSubmitSheet
+        visible={showSheet} onClose={() => setShowSheet(false)}
+        onSubmit={handleSave} loading={saving}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.background },
-  container: { padding: Spacing.md, paddingBottom: 48 },
-  intro: { ...Typography.body, color: Colors.textSecondary, marginBottom: Spacing.md },
   meterCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    alignItems: 'center',
-    marginBottom: Spacing.md,
+    backgroundColor: Colors.surface, borderRadius: Radius.lg,
+    padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.md,
   },
   meterLabel: { ...Typography.label, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  meterValue: { fontSize: 80, fontWeight: '900', color: Colors.text, lineHeight: 90 },
-  meterUnit: { ...Typography.h3, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  countdown: { fontSize: 72, fontWeight: '900', color: Colors.primary, lineHeight: 80 },
+  countdownLabel: { ...Typography.bodySmall, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  meterValue: { fontSize: 32, fontWeight: '700', color: Colors.text },
+  meterUnit: { fontSize: 20, color: Colors.textSecondary },
+  peakValue: { ...Typography.body, color: Colors.info, marginBottom: Spacing.sm },
   riskBadge: {
-    paddingHorizontal: Spacing.md, paddingVertical: 4,
-    borderRadius: Radius.full, color: Colors.white, fontWeight: '700', overflow: 'hidden',
-    marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: 4, borderRadius: Radius.full,
+    color: '#fff', fontWeight: '700', overflow: 'hidden', marginBottom: Spacing.sm,
   },
-  barBg: {
-    height: 12, backgroundColor: Colors.border, borderRadius: Radius.full,
-    width: '100%', overflow: 'hidden',
-  },
+  barBg: { height: 12, backgroundColor: Colors.border, borderRadius: Radius.full, width: '100%', overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: Radius.full },
-  card: {
+  sectionLabel: {
+    ...Typography.label, color: Colors.textSecondary,
+    textAlign: 'center', marginBottom: Spacing.sm,
+  },
+  actionCard: {
     backgroundColor: Colors.surface, borderRadius: Radius.lg,
     padding: Spacing.md, marginBottom: Spacing.md,
+    borderWidth: 1.5, borderColor: Colors.border,
   },
-  cardTitle: { ...Typography.h4, marginBottom: Spacing.sm },
-  actionRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  actionCardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm },
+  actionBadge: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center', alignItems: 'center', marginRight: Spacing.sm,
   },
-  actionInfo: { flex: 1 },
-  actionLabel: { ...Typography.body },
-  actionValue: { ...Typography.bodySmall, marginTop: 2 },
+  actionBadgeText: { color: '#fff', fontWeight: '900', fontSize: 18 },
+  actionCardInfo: { flex: 1 },
+  actionCardTitle: { ...Typography.h4, marginBottom: 2 },
+  actionCardHint: { ...Typography.bodySmall, color: Colors.textSecondary },
+  dbRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+  dbValue: { fontSize: 22, fontWeight: '800' },
+  riskPill: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: Radius.full },
+  riskPillText: { ...Typography.bodySmall, fontWeight: '700' },
   measureBtn: {
-    paddingHorizontal: Spacing.md, paddingVertical: 8,
-    borderRadius: Radius.full,
+    backgroundColor: Colors.primary, borderRadius: Radius.md,
+    paddingVertical: 12, alignItems: 'center',
   },
-  resultsSection: { marginTop: Spacing.sm },
-  sectionTitle: { ...Typography.h3, marginBottom: Spacing.sm },
+  measureBtnRedo: { backgroundColor: Colors.surfaceAlt, borderWidth: 1.5, borderColor: Colors.border },
+  measureBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  measureBtnTextRedo: { color: Colors.textSecondary },
+  videoPicker: { marginTop: Spacing.sm, marginBottom: 0 },
   warning: { ...Typography.body, color: Colors.error, textAlign: 'center', marginTop: Spacing.md },
+  noResults: { ...Typography.body, color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
 });

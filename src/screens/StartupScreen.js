@@ -33,10 +33,17 @@ export default function StartupScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
 
-  // If team already exists, go straight to Main
+  // If team already exists, re-sync to Firestore then go straight to Main
   useEffect(() => {
     const existing = getTeamLocal();
     if (existing) {
+      // Fire-and-forget re-sync in case the original save failed (e.g. was offline)
+      saveTeam(existing.id, {
+        teamName: existing.teamName,
+        members: existing.members,
+        grade: existing.grade,
+        discriminator: existing.id,
+      }).catch(() => {});
       navigation.replace('Main');
     } else {
       setChecking(false);
@@ -62,25 +69,23 @@ export default function StartupScreen({ navigation }) {
 
       // 1. Save locally first (offline-first)
       saveTeamLocal(discriminator, teamName.trim(), members, grade);
-      await AsyncStorage.setItem('teamId', discriminator);
+      const profile = { teamName: teamName.trim(), members, grade, discriminator };
+      await AsyncStorage.multiSet([
+        ['teamId', discriminator],
+        ['teamProfile', JSON.stringify(profile)],
+      ]);
 
-      // 2. Sign in to Firebase anonymously
-      await signInAnon();
-
-      // 3. Sync to Firestore
-      await saveTeam(discriminator, {
-        teamName: teamName.trim(),
-        members,
-        grade,
-        discriminator,
-      });
-
-      // 4. Request notification permission
+      // 2. Request notification permission
       await requestNotificationPermission();
+
+      // 3. Fire-and-forget Firebase sync (fails silently if offline)
+      signInAnon()
+        .then(() => saveTeam(discriminator, { teamName: teamName.trim(), members, grade, discriminator }))
+        .catch(() => {});
 
       navigation.replace('Main');
     } catch (err) {
-      console.error(err);
+      console.warn('[Startup] Setup error (offline?):', err.message);
       // Still navigate — local data was saved
       navigation.replace('Main');
     } finally {

@@ -5,12 +5,13 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl,
+  View, Text, FlatList, ScrollView, StyleSheet, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, Shadow } from '../theme';
 import { getOverallLeaderboard } from '../services/firebase';
+import AdBanner from '../components/AdBanner';
 
 const ACTIVITIES = [
   { id: 'parachute',        label: '1' },
@@ -26,13 +27,18 @@ export default function LeaderboardScreen() {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
+    console.log('[Leaderboard] load() called');
+    setError(null);
     try {
       const data = await getOverallLeaderboard(20);
+      console.log('[Leaderboard] success, entries:', data?.length);
       setEntries(data);
     } catch (err) {
-      console.error('Leaderboard error:', err);
+      console.error('[Leaderboard] FAILED:', err.message, err.stack);
+      setError('Could not reach the leaderboard. Check your connection and pull down to retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -70,13 +76,24 @@ export default function LeaderboardScreen() {
           </View>
         </View>
 
+        {error && entries.length === 0 ? (
+          <ScrollView
+            contentContainerStyle={styles.errorContainer}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+          >
+            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorHint}>Pull down to retry</Text>
+          </ScrollView>
+        ) : (
         <FlatList
           data={entries}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.white} />}
           ListEmptyComponent={
-            <Text style={styles.empty}>No teams yet. Complete an activity to appear here!</Text>
+            <Text style={styles.empty}>
+              No teams yet. Complete an activity to appear here!
+            </Text>
           }
           renderItem={({ item, index }) => {
             const completed = item.completedActivities ?? [];
@@ -110,6 +127,9 @@ export default function LeaderboardScreen() {
             );
           }}
         />
+        )}
+        {/* AdMob banner */}
+        <AdBanner />
       </View>
     </SafeAreaView>
   );
@@ -159,4 +179,7 @@ const styles = StyleSheet.create({
   tickNum: { fontSize: 9, fontWeight: '700', color: '#9CA3AF' },
   countText: { fontSize: 10, color: '#6B7280', marginTop: 4 },
   empty: { textAlign: 'center', marginTop: 48, color: '#6B7280', fontSize: 14 },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  errorText: { fontSize: 15, color: '#EF4444', textAlign: 'center', marginBottom: 8 },
+  errorHint: { fontSize: 13, color: '#9CA3AF', textAlign: 'center' },
 });

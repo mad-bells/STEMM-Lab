@@ -8,36 +8,70 @@
  */
 
 import React, { useState, useRef } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius, Typography, Shadow } from '../../theme';
 import MetricCard from '../../components/MetricCard';
 import PrimaryButton from '../../components/PrimaryButton';
+import InstructionsCard from '../../components/InstructionsCard';
+import ScienceCard from '../../components/ScienceCard';
+import ActivityTabs from '../../components/ActivityTabs';
+import ResultSubmitSheet from '../../components/ResultSubmitSheet';
+import VideoPickerButton from '../../components/VideoPickerButton';
 import { average, stdDev, scoreFromTime } from '../../utils/calculations';
 import { saveResultLocal } from '../../services/database';
 import { getCurrentLocation } from '../../services/location';
-import { submitResult, markActivityComplete } from '../../services/firebase';
+import { submitResult, markActivityComplete, uploadVideo } from '../../services/firebase';
 import { sendNotification } from '../../services/notifications';
+import { syncTeamToFirestore } from '../../utils/syncTeam';
+
+const EQUIPMENT = [
+  'Mobile phone with STEMM Lab app',
+];
+
+const INSTRUCTIONS = [
+  'You will test your reaction time with both hands across 3 attempts each.',
+  'Tap Start, then wait — the TAP button will appear after a random delay.',
+  'Tap the button as fast as you can the moment it appears.',
+  'Complete all 3 attempts with your dominant hand, then swap to the other hand.',
+  'Go to Results and Save. Compare your dominant vs non-dominant hand times!',
+];
+
+const WRITE_UP = {
+  questions: [
+    'Predict: will your dominant or non-dominant hand be faster?',
+    'What is the difference in average reaction time between your hands?',
+    'How could you train to improve your reaction time?',
+  ],
+  columns: ['Reaction Time Prediction', 'Outcome (time + movement)', 'Were you right?'],
+  rows: ['Attempt 1', 'Attempt 2', 'Attempt 3'],
+};
+
+const SCIENCE = [
+  'Your reaction time is how long it takes your brain to detect a signal, process it, and send a command to your muscles.',
+  'Typical human reaction time to a visual stimulus is 150–300 milliseconds. Trained athletes can be faster.',
+  'Your dominant hand is usually slightly faster because the neural pathways for that side are more practised.',
+];
 
 const PHASES = ['Dominant Hand', 'Non-Dominant Hand'];
 const ATTEMPTS = 3;
 
 export default function ReactionBoardScreen() {
+  const [tab, setTab] = useState('instructions');
   const [phase, setPhase] = useState(0);
   const [waiting, setWaiting] = useState(false);
   const [buttonVisible, setButtonVisible] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [results, setResults] = useState([[], []]); // [phase0 times, phase1 times]
+  const [results, setResults] = useState([[], []]);
   const [saving, setSaving] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
+  const [videoUri, setVideoUri] = useState(null);
   const showTimeRef = useRef(null);
   const delayRef = useRef(null);
 
   function startWait() {
     setWaiting(true);
     setButtonVisible(false);
-    // Random delay 1–4 seconds
     const delay = 1000 + Math.random() * 3000;
     delayRef.current = setTimeout(() => {
       showTimeRef.current = Date.now();
@@ -48,9 +82,7 @@ export default function ReactionBoardScreen() {
 
   function handleTap() {
     if (!buttonVisible) return;
-    const reactionMs = Date.now() - showTimeRef.current;
-    const reactionS = reactionMs / 1000;
-
+    const reactionS = (Date.now() - showTimeRef.current) / 1000;
     const updated = results.map((arr) => [...arr]);
     updated[phase] = [...updated[phase], reactionS];
     setResults(updated);
@@ -60,7 +92,6 @@ export default function ReactionBoardScreen() {
     if (nextAttempt < ATTEMPTS) {
       setAttempt(nextAttempt);
     } else {
-      // Phase complete
       setAttempt(0);
       if (phase < PHASES.length - 1) {
         Alert.alert(
@@ -72,7 +103,10 @@ export default function ReactionBoardScreen() {
     }
   }
 
-  async function handleSave() {
+  const allDone = results[PHASES.length - 1].length === ATTEMPTS;
+  const hasResults = results.some((arr) => arr.length > 0);
+
+  async function handleSave({ rating, comment }) {
     const flat = results.flat();
     if (!flat.length) { Alert.alert('No data', 'Complete at least one attempt.'); return; }
 
@@ -82,116 +116,126 @@ export default function ReactionBoardScreen() {
       const loc = await getCurrentLocation();
       const avgTime = average(flat);
       const score = scoreFromTime(avgTime, 0.1, 1.5);
+      const videoUrl = videoUri ? await uploadVideo(teamId, 'reaction', videoUri) : null;
 
       const data = {
-        phases: PHASES,
-        times: results,
+        phases: PHASES, times: results,
         averages: results.map((arr) => arr.length ? average(arr) : null),
         stdDevs: results.map((arr) => arr.length > 1 ? stdDev(arr) : null),
+        rating, comment, videoUrl,
       };
 
       saveResultLocal(teamId, 'reaction', data, score, loc?.latitude, loc?.longitude);
-      await submitResult(teamId, 'reaction', { ...data, score });
-      await markActivityComplete(teamId, 'reactionboard');
-      await sendNotification('Activity Complete! ⚡', `Reaction time saved. Score: ${score} pts`);
-
-      Alert.alert('Saved!', `Avg: ${(avgTime * 1000).toFixed(0)}ms · Score: ${score} pts`);
-    } catch (err) {
-      Alert.alert('Error', err.message);
-    } finally {
+      setShowSheet(false);
       setSaving(false);
+      submitResult(teamId, 'reaction', { ...data, score }).catch(console.warn);
+      markActivityComplete(teamId, 'reactionboard').catch(console.warn);
+      syncTeamToFirestore().catch(console.warn);
+      sendNotification('Activity Complete!', 'Reaction time saved.').catch(console.warn);
+      Alert.alert('Saved!', `Avg: ${(avgTime * 1000).toFixed(0)}ms`);
+    } catch (err) {
+      setSaving(false);
+      Alert.alert('Error', err.message);
     }
   }
 
-  const allDone = results[PHASES.length - 1].length === ATTEMPTS;
   const currentPhaseResults = results[phase];
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <Text style={styles.intro}>
-        Tap the button the instant it appears. Test both hands across {ATTEMPTS} attempts each.
-      </Text>
-
-      {/* Phase indicator */}
-      <View style={styles.phaseRow}>
-        {PHASES.map((p, i) => (
-          <View key={i} style={[styles.phaseChip, phase === i && styles.phaseChipActive]}>
-            <Text style={[styles.phaseChipText, phase === i && styles.phaseChipTextActive]}>
-              {p}
-            </Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Reaction area */}
-      {!allDone && (
-        <View style={[styles.reactionCard, Shadow.md]}>
-          <Text style={styles.phaseLabel}>{PHASES[phase]} — Attempt {attempt + 1}/{ATTEMPTS}</Text>
-
-          {!waiting && !buttonVisible && (
-            <PrimaryButton title="▶ Start" onPress={startWait} style={{ marginTop: Spacing.md }} />
-          )}
-
-          {waiting && (
-            <View style={styles.waitBox}>
-              <Text style={styles.waitText}>Get ready…</Text>
-              <Text style={styles.waitSub}>Tap when the button appears!</Text>
-            </View>
-          )}
-
-          {buttonVisible && (
-            <TouchableOpacity style={styles.tapButton} onPress={handleTap} activeOpacity={0.7}>
-              <Text style={styles.tapButtonText}>TAP!</Text>
-            </TouchableOpacity>
-          )}
-
-          {currentPhaseResults.length > 0 && (
-            <View style={styles.attemptsList}>
-              {currentPhaseResults.map((t, i) => (
-                <Text key={i} style={styles.attemptText}>
-                  Attempt {i + 1}: {(t * 1000).toFixed(0)}ms
-                </Text>
+    <>
+      <ActivityTabs
+        tab={tab} onTabChange={setTab} hasResults={hasResults}
+        instructions={
+          <>
+            <InstructionsCard steps={INSTRUCTIONS} equipment={EQUIPMENT} writeUp={WRITE_UP} />
+            <ScienceCard paragraphs={SCIENCE} />
+          </>
+        }
+        record={
+          <>
+            <View style={styles.phaseRow}>
+              {PHASES.map((p, i) => (
+                <View key={i} style={[styles.phaseChip, phase === i && styles.phaseChipActive]}>
+                  <Text style={[styles.phaseChipText, phase === i && styles.phaseChipTextActive]}>{p}</Text>
+                </View>
               ))}
             </View>
-          )}
-        </View>
-      )}
 
-      {/* Summary */}
-      {results.some((arr) => arr.length > 0) && (
-        <View style={styles.resultsSection}>
-          <Text style={styles.sectionTitle}>📊 Results</Text>
-          {PHASES.map((p, i) =>
-            results[i].length > 0 ? (
-              <View key={i}>
-                <MetricCard
-                  label={p + ' — Avg'}
-                  value={(average(results[i]) * 1000).toFixed(0)}
-                  unit="ms"
-                  color={Colors.secondary}
-                />
-                {results[i].length > 1 && (
-                  <MetricCard
-                    label={p + ' — Std Dev'}
-                    value={(stdDev(results[i]) * 1000).toFixed(0)}
-                    unit="ms"
-                    color={Colors.textSecondary}
-                  />
+            {!allDone && (
+              <View style={[styles.reactionCard, Shadow.md]}>
+                <Text style={styles.phaseLabel}>{PHASES[phase]} — Attempt {attempt + 1}/{ATTEMPTS}</Text>
+
+                {!waiting && !buttonVisible && (
+                  <PrimaryButton title="Start" onPress={startWait} style={{ marginTop: Spacing.md }} />
+                )}
+                {waiting && (
+                  <View style={styles.waitBox}>
+                    <Text style={styles.waitText}>Get ready…</Text>
+                    <Text style={styles.waitSub}>Tap when the button appears!</Text>
+                  </View>
+                )}
+                {buttonVisible && (
+                  <TouchableOpacity style={styles.tapButton} onPress={handleTap} activeOpacity={0.7}>
+                    <Text style={styles.tapButtonText}>TAP!</Text>
+                  </TouchableOpacity>
+                )}
+                {currentPhaseResults.length > 0 && (
+                  <View style={styles.attemptsList}>
+                    {currentPhaseResults.map((t, i) => (
+                      <Text key={i} style={styles.attemptText}>
+                        Attempt {i + 1}: {(t * 1000).toFixed(0)}ms
+                      </Text>
+                    ))}
+                  </View>
                 )}
               </View>
-            ) : null
-          )}
-          <PrimaryButton title="💾 Save Result" onPress={handleSave} loading={saving} style={{ marginTop: Spacing.md }} />
-        </View>
-      )}
-    </ScrollView>
+            )}
+
+            <VideoPickerButton uri={videoUri} onPick={setVideoUri} />
+            {allDone && (
+              <PrimaryButton title="View Results" onPress={() => setTab('results')} style={{ marginTop: Spacing.sm }} />
+            )}
+          </>
+        }
+        results={
+          hasResults ? (
+            <>
+              {PHASES.map((p, i) =>
+                results[i].length > 0 ? (
+                  <View key={i}>
+                    <MetricCard
+                      label={p + ' — Avg'}
+                      value={(average(results[i]) * 1000).toFixed(0)}
+                      unit="ms"
+                      color={Colors.secondary}
+                    />
+                    {results[i].length > 1 && (
+                      <MetricCard
+                        label={p + ' — Std Dev'}
+                        value={(stdDev(results[i]) * 1000).toFixed(0)}
+                        unit="ms"
+                        color={Colors.textSecondary}
+                      />
+                    )}
+                  </View>
+                ) : null
+              )}
+              <PrimaryButton title="Save Result" onPress={() => setShowSheet(true)} style={{ marginTop: Spacing.md }} />
+            </>
+          ) : (
+            <Text style={styles.noResults}>Complete at least one attempt in the Record tab first.</Text>
+          )
+        }
+      />
+      <ResultSubmitSheet
+        visible={showSheet} onClose={() => setShowSheet(false)}
+        onSubmit={handleSave} loading={saving}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.background },
-  container: { padding: Spacing.md, paddingBottom: 48 },
-  intro: { ...Typography.body, color: Colors.textSecondary, marginBottom: Spacing.md },
   phaseRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   phaseChip: {
     flex: 1, padding: Spacing.sm, borderRadius: Radius.md,
@@ -199,7 +243,7 @@ const styles = StyleSheet.create({
   },
   phaseChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   phaseChipText: { ...Typography.label, color: Colors.textSecondary },
-  phaseChipTextActive: { color: Colors.white, fontWeight: '700' },
+  phaseChipTextActive: { color: '#fff', fontWeight: '700' },
   reactionCard: {
     backgroundColor: Colors.surface, borderRadius: Radius.lg,
     padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.md, minHeight: 220,
@@ -212,9 +256,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg, width: 160, height: 160, borderRadius: 80,
     backgroundColor: Colors.error, justifyContent: 'center', alignItems: 'center',
   },
-  tapButtonText: { color: Colors.white, fontSize: 28, fontWeight: '900' },
+  tapButtonText: { color: '#fff', fontSize: 28, fontWeight: '900' },
   attemptsList: { marginTop: Spacing.md, width: '100%' },
   attemptText: { ...Typography.body, textAlign: 'center', marginBottom: 4 },
-  resultsSection: { marginTop: Spacing.sm },
-  sectionTitle: { ...Typography.h3, marginBottom: Spacing.sm },
+  noResults: { ...Typography.body, color: Colors.textSecondary, textAlign: 'center', marginTop: 40 },
 });
