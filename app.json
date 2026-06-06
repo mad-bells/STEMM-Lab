@@ -20,7 +20,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.stemmlab.app"
+      "package": "com.stemmlab.app",
+      "kotlinVersion": "1.9.24"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,7 +30,10 @@
       "firebaseProjectId": "stemm-lab-5c5fa",
       "firebaseStorageBucket": "stemm-lab-5c5fa.firebasestorage.app",
       "admobBannerIosId": "ca-app-pub-3940256099942544/2934735716",
-      "admobBannerAndroidId": "ca-app-pub-3940256099942544/6300978111"
+      "admobBannerAndroidId": "ca-app-pub-3940256099942544/6300978111",
+      "eas": {
+        "projectId": "6105c7be-3ae6-4d27-91c3-874bd8dffb33"
+      }
     },
     "plugins": [
       [
@@ -38,7 +42,8 @@
           "androidAppId": "ca-app-pub-3940256099942544~3347511713",
           "iosAppId": "ca-app-pub-3940256099942544~1458002511"
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }
