@@ -1,47 +1,29 @@
 {
   "expo": {
-    "name": "stemm-lab",
+    "name": "STEMM Lab",
     "slug": "stemm-lab",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-<<<<<<< HEAD
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-=======
->>>>>>> 3bfa70a0c1a39767885c18004058324c3fa03da6
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stemmlab.app"
     },
     "android": {
       "adaptiveIcon": {
-<<<<<<< HEAD
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      "expo-sqlite"
-    ]
-=======
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      "package": "com.stemmlab.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     }
->>>>>>> 3bfa70a0c1a39767885c18004058324c3fa03da6
   }
 }
