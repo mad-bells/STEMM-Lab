@@ -2,14 +2,14 @@
   "testlab": {
     "device": [
       {
-        "model": "Pixel2",
-        "version": "28",
+        "model": "redfin",
+        "version": "30",
         "locale": "en",
         "orientation": "portrait"
       },
       {
-        "model": "Nexus6",
-        "version": "25",
+        "model": "bluejay",
+        "version": "32",
         "locale": "en",
         "orientation": "portrait"
       }

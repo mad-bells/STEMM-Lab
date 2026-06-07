@@ -34,15 +34,8 @@ console.log(`\n🔥  Firebase Test Lab — Robo Test`);
 console.log(`    Project : ${PROJECT_ID}`);
 console.log(`    APK     : ${apkPath}\n`);
 
-// Ensure the results bucket exists (ignore error if already exists)
-try {
-  execSync(`gcloud storage buckets create gs://${RESULTS_BUCKET} --project=${PROJECT_ID}`, { stdio: 'pipe' });
-  console.log(`✅  Created results bucket: gs://${RESULTS_BUCKET}`);
-} catch (_) {
-  // Bucket already exists — that's fine
-}
-
 // Run Robo test on two device/API combinations defined in firebase.json
+// Results bucket is auto-created by Firebase Test Lab (no billing needed for default bucket)
 const cmd = [
   'gcloud firebase test android run',
   `--project=${PROJECT_ID}`,
@@ -50,11 +43,9 @@ const cmd = [
   '--type=robo',
   '--robo-directives=text:teamName=TestTeam,text:memberInput=Alice',
   '--timeout=90s',
-  '--device model=Pixel2,version=28,locale=en,orientation=portrait',
-  '--device model=Nexus6,version=25,locale=en,orientation=portrait',
-  `--results-bucket=${RESULTS_BUCKET}`,
-  '--results-dir=robo-$(date +%Y%m%d-%H%M%S)',
-  '--no-performance-metrics',  // skip video recording to reduce cost
+  '--device model=redfin,version=30,locale=en,orientation=portrait',
+  '--device model=bluejay,version=32,locale=en,orientation=portrait',
+  '--no-performance-metrics',
 ].join(' \\\n  ');
 
 console.log('Running:\n', cmd, '\n');
