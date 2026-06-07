@@ -11,7 +11,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, Shadow } from '../theme';
 import { getOverallLeaderboard } from '../services/firebase';
-import AdBanner from '../components/AdBanner';
 
 const ACTIVITIES = [
   { id: 'parachute',        label: '1' },
@@ -128,8 +127,6 @@ export default function LeaderboardScreen() {
           }}
         />
         )}
-        {/* AdMob banner */}
-        <AdBanner />
       </View>
     </SafeAreaView>
   );

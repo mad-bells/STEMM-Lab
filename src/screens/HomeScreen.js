@@ -8,7 +8,6 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import AdBanner from '../components/AdBanner';
 import ActivityCard from '../components/ActivityCard';
 import { getTeamLocal } from '../services/database';
 
@@ -70,9 +69,6 @@ export default function HomeScreen({ navigation }) {
             />
           ))}
         </View>
-
-        {/* AdMob banner */}
-        <AdBanner style={styles.ad} />
 
       </ScrollView>
     </SafeAreaView>
@@ -137,9 +133,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: 11,
-  },
-  ad: {
-    marginTop: 8,
-    marginBottom: 8,
   },
 });

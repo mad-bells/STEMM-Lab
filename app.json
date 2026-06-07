@@ -28,28 +28,11 @@
     "extra": {
       "firebaseProjectId": "stemm-lab-5c5fa",
       "firebaseStorageBucket": "stemm-lab-5c5fa.firebasestorage.app",
-      "admobBannerIosId": "ca-app-pub-3940256099942544/2934735716",
-      "admobBannerAndroidId": "ca-app-pub-3940256099942544/6300978111",
-      "eas": {
+"eas": {
         "projectId": "6105c7be-3ae6-4d27-91c3-874bd8dffb33"
       }
     },
     "plugins": [
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
-        }
-      ],
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "kotlinVersion": "2.1.0"
-          }
-        }
-      ],
       "expo-font"
     ]
   }
