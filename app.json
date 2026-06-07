@@ -20,8 +20,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.stemmlab.app",
-      "kotlinVersion": "1.9.24"
+      "package": "com.stemmlab.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,6 +40,14 @@
         {
           "androidAppId": "ca-app-pub-3940256099942544~3347511713",
           "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.24"
+          }
         }
       ],
       "expo-font"
