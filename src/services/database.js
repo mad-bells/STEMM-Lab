@@ -74,3 +74,9 @@ export function markResultSynced(id) {
   const database = getDb();
   database.runSync(`UPDATE results SET synced = 1 WHERE id = ?`, [id]);
 }
+
+export function clearAllLocalData() {
+  const database = getDb();
+  database.runSync(`DELETE FROM team`);
+  database.runSync(`DELETE FROM results`);
+}

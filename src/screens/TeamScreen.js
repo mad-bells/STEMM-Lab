@@ -14,13 +14,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, Radius, Typography, Shadow } from '../theme';
 import PrimaryButton from '../components/PrimaryButton';
-import { getTeamLocal, saveTeamLocal } from '../services/database';
+import { getTeamLocal, saveTeamLocal, clearAllLocalData } from '../services/database';
 import { saveTeam } from '../services/firebase';
+import { useNavigation } from '@react-navigation/native';
 
 const GRADES = ['Year 5', 'Year 6', 'Year 7', 'Year 8', 'Year 9', 'Year 10'];
 const MAX_MEMBERS = 4;
 
 export default function TeamScreen() {
+  const navigation = useNavigation();
   const [team, setTeam] = useState(null);
   const [teamName, setTeamName] = useState('');
   const [members, setMembers] = useState(['', '', '', '']);
@@ -72,6 +74,24 @@ export default function TeamScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleReset() {
+    Alert.alert(
+      'Reset app',
+      'This will clear all local team data and return to the registration screen. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            clearAllLocalData();
+            navigation.reset({ index: 0, routes: [{ name: 'Startup' }] });
+          },
+        },
+      ]
+    );
   }
 
   function updateMember(index, value) {
@@ -167,6 +187,11 @@ export default function TeamScreen() {
           loading={saving}
           style={[styles.saveBtn, saved && styles.saveBtnDone]}
         />
+
+        {/* Reset */}
+        <TouchableOpacity style={styles.resetBtn} onPress={handleReset}>
+          <Text style={styles.resetText}>Reset app / new session</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -252,4 +277,7 @@ const styles = StyleSheet.create({
 
   saveBtn: { marginHorizontal: Spacing.md, marginTop: Spacing.lg },
   saveBtnDone: { backgroundColor: '#22C55E' },
+
+  resetBtn: { alignSelf: 'center', marginTop: Spacing.lg, paddingVertical: 8, paddingHorizontal: 16 },
+  resetText: { fontSize: 13, color: Colors.textSecondary, textDecorationLine: 'underline' },
 });
